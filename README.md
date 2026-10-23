@@ -8,7 +8,7 @@ Built for the **Alexa+ track** of the Build, Ship, Shape: Amazon Developer Hacka
 
 ## Demo
 
-**Demo video:** [Insert your public YouTube or Vimeo link]
+**Demo video:** https://youtu.be/NrQNU50504U
 
 **Primary track:** Alexa+
 
