@@ -1,61 +1,66 @@
 # CampusPilot AI
 
-**An AI-powered student productivity assistant with MCP and an Alexa-style browser simulation.**
+**An AI-powered study assistant for managing academic tasks, deadlines, and study plans.**
 
-CampusPilot AI helps students organize assignments, manage deadlines, track academic progress, and interact with their task manager using natural language.
+CampusPilot AI helps students organize assignments, track academic progress, and manage their workload through a natural-language AI assistant and a browser-based Alexa-style interface.
 
-Built for the **Alexa+ track** of the Build, Ship, Shape: Amazon Developer Hackathon, the project combines a Gemini-powered assistant, a FastAPI backend, SQLite task storage, and a self-hosted Model Context Protocol (MCP) server using Streamable HTTP.
+Built for the **Alexa+ track** of the Build, Ship, Shape: Amazon Developer Hackathon, CampusPilot AI combines a Gemini-powered assistant, a FastAPI backend, SQLite storage, and a self-hosted Model Context Protocol (MCP) server.
 
-## Demo
+## Project Links
 
-**Demo video:** https://youtu.be/NrQNU50504U
+- **GitHub Repository:** https://github.com/abdullah-tahir650/campuspilot-ai
+- **Demo Video:** https://youtu.be/NrQNU50504U
+- **Primary Track:** Alexa+
 
-**Primary track:** Alexa+
-
-CampusPilot Voice is a browser-based, Alexa-style simulation. It demonstrates conversational interaction with the existing CampusPilot task-management system; it is not an official integration with a physical Alexa+ device.
+**Note:** CampusPilot Voice is a browser-based Alexa-style simulation. It demonstrates conversational interaction with the CampusPilot task-management system and is not an official integration with a physical Alexa+ device.
 
 ## Features
 
-- **AI study assistant:** Understands natural-language requests and provides study advice and planning assistance.
-- **Task management:** Create, list, complete, reopen, and delete academic tasks.
-- **Task organization:** Store task titles, subjects, deadlines, priorities, and completion status.
-- **Progress dashboard:** Display total, completed, and pending tasks, along with a completion percentage.
-- **Study planner:** Present outstanding tasks organized by deadline and priority.
-- **MCP integration:** Expose task-management capabilities through five MCP tools over Streamable HTTP.
-- **Alexa-style simulation:** Provide a browser-based interface for conversational interaction with the assistant.
+- **AI Study Assistant:** Interact with an AI assistant using natural language to get study advice and planning assistance.
+- **Academic Task Management:** Create, list, complete, reopen, and delete tasks.
+- **Task Organization:** Organize academic work using task titles, descriptions, deadlines, and available priority or subject fields.
+- **Progress Dashboard:** View task totals, completed and pending tasks, and completion progress.
+- **Study Planning:** Review outstanding tasks and organize work around deadlines and priorities.
+- **MCP Integration:** Expose task-management operations through five MCP tools.
+- **Alexa-Style Browser Simulation:** Demonstrate conversational productivity interactions through a dedicated browser interface.
+- **Persistent Storage:** Store tasks in an SQLite database so task information remains available between application sessions.
 
 ## Technology Stack
 
 | Technology | Purpose |
 |---|---|
-| HTML, CSS, JavaScript | Frontend dashboard and interactions |
-| Python | Application and MCP server logic |
+| HTML | Frontend structure |
+| CSS | Layout and styling |
+| JavaScript | Frontend interactions and API requests |
+| Python | Backend and server logic |
 | FastAPI | REST API and chat endpoints |
-| Google Gemini API | Natural-language understanding and study assistance |
+| Google Gemini API | AI-powered study assistance |
 | Google Gen AI SDK | Communication with Gemini |
-| Model Context Protocol (MCP) Python SDK | MCP server and client integration |
-| Streamable HTTP | MCP client-server communication |
+| MCP Python SDK | MCP server and client integration |
+| Streamable HTTP | MCP communication |
 | SQLite | Persistent task storage |
 | Cloudflare Tunnel | Optional temporary public access for demonstrations |
 
 ## Architecture
 
-The application has four main components:
+CampusPilot AI consists of four main components:
 
-1. **Frontend:** The student dashboard, task controls, AI chat, and Alexa-style browser simulation.
-2. **FastAPI backend:** Provides REST endpoints, coordinates AI responses, validates requests, and routes chat-based task operations through MCP.
-3. **MCP server:** Exposes the task-management tools through Streamable HTTP and verifies bearer-token authentication.
-4. **SQLite database:** Stores tasks and their completion status, deadlines, and metadata.
+1. **Frontend:** Provides the student dashboard, task controls, AI chat interface, and Alexa-style browser simulation.
+2. **FastAPI Backend:** Handles API requests, coordinates AI interactions, and manages communication with the task-management system.
+3. **MCP Server:** Exposes task-management operations through MCP tools over Streamable HTTP.
+4. **SQLite Database:** Stores tasks and their associated information.
 
-The chat workflow is:
+### Chat Workflow
 
-`Student → Frontend → FastAPI → Gemini intent classification → MCP client → MCP server tools → SQLite database`
+A typical conversational task-management workflow is:
 
-The dashboard's existing REST task endpoints remain available as well.
+`Student → Frontend → FastAPI → Gemini → MCP Client → MCP Server → SQLite Database`
+
+The application also provides REST endpoints for direct task-management operations.
 
 ## MCP Tools
 
-The self-hosted MCP server exposes the following tools:
+The MCP server exposes the following task-management tools:
 
 | Tool | Description |
 |---|---|
@@ -63,63 +68,75 @@ The self-hosted MCP server exposes the following tools:
 | `create_task` | Create a task with a title, description, and due date |
 | `complete_task` | Mark a task as completed |
 | `reopen_task` | Reopen a completed task |
-| `delete_task` | Permanently delete a task |
+| `delete_task` | Delete a task |
 
-The chat interface requires explicit confirmation before deleting a task.
+The chat interface is designed to request confirmation before deleting a task. Verify this behavior in the running application before relying on it.
 
 ## Requirements
 
 - Python 3.10 or later, compatible with the installed dependencies
-- A Google Gemini API key
-- A modern browser such as Chrome or Edge
-- Visual Studio Code and the Live Server extension for serving the frontend during local development
+- A valid Google Gemini API key
+- Visual Studio Code or another code editor
+- A modern web browser, such as Chrome or Edge
+- The Live Server extension for Visual Studio Code, for local frontend development
 
 ## Setup and Installation
 
-### 1. Clone the repository
+### 1. Clone the Repository
+
+Open a terminal and run:
 
 ```bash
-git clone YOUR_GITHUB_REPOSITORY_URL
+git clone https://github.com/abdullah-tahir650/campuspilot-ai.git
 cd campuspilot-ai
 ```
 
-Replace `YOUR_GITHUB_REPOSITORY_URL` with the actual repository URL.
-
-### 2. Create and activate a virtual environment
+### 2. Create a Virtual Environment
 
 On Windows PowerShell:
 
 ```powershell
 python -m venv .venv
+```
+
+Activate the environment:
+
+```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 3. Install dependencies
+If activation is unavailable in your terminal, you can run commands directly using the Python executable inside `.venv`.
+
+### 3. Install Dependencies
+
+Run:
 
 ```powershell
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
+### 4. Configure Environment Variables
 
-Create a local `.env` file based on `.env.example`.
+Create a local `.env` file using `.env.example` as a template.
 
-Set the following variables:
+Add your own Gemini API key and any other configuration variables required by your current application code.
+
+Example configuration:
 
 ```dotenv
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.5-flash
+GEMINI_MODEL=your_supported_gemini_model
 MCP_ACCESS_TOKEN=your_private_random_token
 MCP_SERVER_URL=http://localhost:8001/mcp
 ```
 
-Use your own valid Gemini API key and generate a private, unpredictable MCP access token. Never commit the real `.env` file or share credentials publicly.
+Replace the example values with valid values that match your application configuration. The Gemini model ID must be supported by your API account and match what your code expects.
 
-The MCP client defaults to `http://localhost:8001/mcp` when `MCP_SERVER_URL` is not configured.
+The MCP access token should only be included if the current MCP server and client use it for authentication. Configure the server and client consistently.
 
-**MCP server configuration:** For local development, configure the MCP server's `issuer_url` and `resource_server_url` for the local server as required by the installed MCP SDK. For public tunnel access, update the advertised resource URL and allowed host settings to match the current public hostname. Cloudflare Quick Tunnel URLs are temporary and should not be treated as permanent deployment addresses.
+**Security:** Never commit your real `.env` file, API keys, private tokens, or other credentials to GitHub. Commit `.env.example` only when it contains placeholders rather than real secrets.
 
-### 5. Start the MCP server
+### 5. Start the MCP Server
 
 Open a terminal in the repository root and run:
 
@@ -127,9 +144,9 @@ Open a terminal in the repository root and run:
 .\.venv\Scripts\python.exe -m backend.mcp_server
 ```
 
-The MCP server uses port `8001` by default. Keep this terminal running.
+The MCP server is configured to use port `8001` by default. Keep this terminal running.
 
-### 6. Start the FastAPI backend
+### 6. Start the FastAPI Backend
 
 Open a second terminal in the repository root and run:
 
@@ -137,63 +154,80 @@ Open a second terminal in the repository root and run:
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
 ```
 
-The API is available locally at:
+The FastAPI application will normally be available at `http://127.0.0.1:8000`.
 
-- Application health: `http://127.0.0.1:8000/health`
-- API documentation: `http://127.0.0.1:8000/docs`
-- Chat endpoint: `http://127.0.0.1:8000/api/chat`
-- Alexa-style simulation: `http://127.0.0.1:8000/alexa-demo`
+Useful endpoints include:
 
-The Alexa-style route is available when the simulation files and route have been installed in the project.
+| Endpoint | Purpose |
+|---|---|
+| `http://127.0.0.1:8000/` | Application root |
+| `http://127.0.0.1:8000/health` | Health check |
+| `http://127.0.0.1:8000/docs` | Interactive API documentation |
+| `http://127.0.0.1:8000/tasks` | Task API |
+| `http://127.0.0.1:8000/api/chat` | AI chat endpoint |
+| `http://127.0.0.1:8000/alexa-demo` | Alexa-style interface, if the route is installed and enabled |
 
-### 7. Start the frontend
+The endpoints available in your running application may vary with the current project version.
 
-Open `frontend/index.html` in Visual Studio Code and select **Open with Live Server**.
+### 7. Start the Frontend
 
-The frontend is normally available at:
+Open the project in Visual Studio Code.
 
-`http://127.0.0.1:5500`
+Open the `Frontend` folder and use the Live Server extension to serve `index.html`.
 
-Keep the backend and MCP server running while using the application locally.
+If Live Server is launched from the project root, the frontend will typically be available at:
+
+`http://127.0.0.1:5500/Frontend/index.html`
+
+If you open the `Frontend` folder itself in Visual Studio Code, the URL may instead be:
+
+`http://127.0.0.1:5500/index.html`
+
+Make sure the frontend is configured to communicate with the running FastAPI backend.
+
+Keep the backend and MCP server running while testing features that depend on them.
 
 ## Testing the MCP Server
 
-To inspect and test the available tools:
+You can use MCP Inspector to examine and test the available MCP tools.
 
 1. Start the MCP server.
 2. Launch MCP Inspector.
-3. Connect using Streamable HTTP to the configured MCP endpoint.
-4. Supply the appropriate bearer token through the Authorization header.
-5. Inspect the available tools and invoke them to verify their responses.
+3. Configure a connection to the MCP endpoint exposed by your server using Streamable HTTP.
+4. Provide authentication credentials if authentication is enabled in your current implementation.
+5. Inspect the available tools and test task operations.
 
-The task tools have been tested against the project's SQLite database during development.
+Verify tool responses, task updates, and database persistence before considering the integration fully tested.
 
-## Security Notes
+## Security Considerations
 
-- Keep `.env`, API keys, and bearer tokens out of the repository.
-- Use `.env.example` for documenting required configuration.
-- Do not commit `.venv` or private task data.
-- The existing REST task endpoints do not include application-level user authentication. Avoid exposing the backend publicly without appropriate access controls.
-- Cloudflare Quick Tunnels are temporary demonstration tunnels, not permanent hosting.
+- Keep API keys and private configuration in `.env`.
+- Use `.env.example` to document the required configuration variables.
+- Do not commit `.venv`, private credentials, or personal task data.
+- Verify that authentication is enabled and enforced before exposing the MCP server or backend publicly.
+- The REST task endpoints may not provide application-level user authentication. Do not expose an unrestricted backend containing personal data to the public internet.
+- Cloudflare Quick Tunnels provide temporary demonstration access and should not be treated as permanent hosting.
 
 ## Hackathon Track
 
-**Primary track:** Alexa+
+**Primary Track: Alexa+**
 
-This project demonstrates a self-hosted MCP server with Streamable HTTP and a browser-based Alexa-style simulation. The simulation reuses CampusPilot's task-management backend and MCP-connected chat workflow to demonstrate conversational productivity interactions.
+CampusPilot AI demonstrates conversational productivity interactions through an Alexa-style browser simulation connected to a student task-management application.
+
+Its use of MCP provides a way to expose task-management capabilities as tools that an AI-enabled workflow can call. The browser simulation is a demonstration interface and does not represent an official physical Alexa+ integration.
 
 ## Future Improvements
 
-- Stable cloud deployment with secure access controls
-- More advanced multi-step agent workflows
-- Additional study-planning and deadline-management features
-- Persistent user profiles and personalized study preferences
-- Further improvements to accessibility and voice interaction
+- Stable cloud deployment with appropriate access controls
+- More advanced multi-step AI workflows
+- Improved deadline reminders and personalized study planning
+- User profiles and individualized academic preferences
+- Better accessibility and voice-interaction capabilities
+- Additional testing and stronger application security
 
 ## License
 
-[Specify the open-source license used for this project.]
+This project is intended to be released under the MIT License.
 
-For a public hackathon repository, include the full text of your chosen license in a `LICENSE` file and ensure the license is visible on the GitHub repository page.
-
+See the [LICENSE](LICENSE) file for the license terms.
 
