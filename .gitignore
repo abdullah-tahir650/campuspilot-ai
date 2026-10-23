@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment secrets
+.env
+.env.*
+
+# Allow the example environment file
+!.env.example
+
+# Database and local data
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and operating system
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log

@@ -1,0 +1,6 @@
+
+fastapi
+uvicorn[standard]
+python-dotenv
+google-genai
+mcp>=1.28,<2

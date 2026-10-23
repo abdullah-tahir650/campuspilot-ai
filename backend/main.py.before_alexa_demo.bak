@@ -1,0 +1,793 @@
+import json
+import logging
+import re
+from contextlib import asynccontextmanager
+from datetime import date
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from backend.ai_assistant import ask_ai, TASK_META_PREFIX
+from backend.mcp_client import call_mcp_tool
+from backend.database import (
+    init_db,
+    create_task,
+    list_tasks,
+    complete_task,
+    delete_task,
+    reopen_task,
+)
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="CampusPilot AI API",
+    description="Student task management and AI assistant backend",
+    version="1.3.0",
+    lifespan=lifespan,
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "http://127.0.0.1:5501",
+        "http://localhost:5501",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    due_date: str = Field(default="", max_length=50)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+
+
+# --------------------------------------------------
+# MCP helper functions
+# --------------------------------------------------
+
+def mcp_list_tasks() -> list[dict]:
+    """Retrieve tasks through the MCP server."""
+
+    result = call_mcp_tool(
+        "list_tasks",
+        {"include_completed": True},
+    )
+
+    if not result.get("success"):
+        raise RuntimeError(
+            result.get("error", "MCP could not list tasks.")
+        )
+
+    tasks = result.get("tasks", [])
+
+    if not isinstance(tasks, list):
+        raise RuntimeError("MCP returned an invalid task list.")
+
+    return tasks
+
+
+def mcp_create_task(
+    title: str,
+    description: str,
+    due_date: str,
+) -> dict:
+    """Create a task through MCP."""
+
+    result = call_mcp_tool(
+        "create_task",
+        {
+            "title": title,
+            "description": description,
+            "due_date": due_date,
+        },
+    )
+
+    if not result.get("success"):
+        raise RuntimeError(
+            result.get("error", "MCP could not create the task.")
+        )
+
+    task = result.get("task")
+
+    if not isinstance(task, dict):
+        raise RuntimeError("MCP did not return the created task.")
+
+    return task
+
+
+def mcp_update_task(
+    action: str,
+    task_id: int,
+) -> dict:
+    """Complete or reopen a task through MCP."""
+
+    if action not in ("complete_task", "reopen_task"):
+        raise ValueError("Unsupported task update action.")
+
+    result = call_mcp_tool(
+        action,
+        {"task_id": task_id},
+    )
+
+    if not result.get("success"):
+        raise RuntimeError(
+            result.get("error", f"MCP could not {action}.")
+        )
+
+    task = result.get("task")
+
+    if not isinstance(task, dict):
+        raise RuntimeError("MCP did not return the updated task.")
+
+    return task
+
+
+def mcp_delete_task(task_id: int) -> None:
+    """Delete a task through MCP."""
+
+    result = call_mcp_tool(
+        "delete_task",
+        {"task_id": task_id},
+    )
+
+    if not result.get("success"):
+        raise RuntimeError(
+            result.get("error", "MCP could not delete the task.")
+        )
+
+
+# --------------------------------------------------
+# Task metadata and matching helpers
+# --------------------------------------------------
+
+def get_task_metadata(task):
+    """Read subject and priority stored in the task description."""
+
+    description = task.get("description") or ""
+
+    if description.startswith(TASK_META_PREFIX):
+        try:
+            metadata = json.loads(
+                description[len(TASK_META_PREFIX):]
+            )
+
+            if isinstance(metadata, dict):
+                subject = metadata.get("subject", "General")
+                priority = metadata.get("priority", "medium")
+
+                if not isinstance(subject, str) or not subject.strip():
+                    subject = "General"
+
+                if priority not in ("low", "medium", "high"):
+                    priority = "medium"
+
+                return subject.strip(), priority
+
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "Could not decode task metadata for task ID %s",
+                task.get("id"),
+            )
+
+    return "General", "medium"
+
+
+def find_task_by_title(tasks, requested_title):
+    """Find an exact match first, otherwise a unique partial match."""
+
+    if (
+        not isinstance(requested_title, str)
+        or not requested_title.strip()
+    ):
+        return None, "missing"
+
+    requested = requested_title.strip().casefold()
+
+    exact_matches = [
+        task for task in tasks
+        if (task.get("title") or "").strip().casefold() == requested
+    ]
+
+    if len(exact_matches) == 1:
+        return exact_matches[0], None
+
+    if len(exact_matches) > 1:
+        return None, "ambiguous"
+
+    partial_matches = [
+        task for task in tasks
+        if requested in (task.get("title") or "").casefold()
+    ]
+
+    if len(partial_matches) == 1:
+        return partial_matches[0], None
+
+    if len(partial_matches) > 1:
+        return None, "ambiguous"
+
+    return None, "not_found"
+
+
+def find_exact_task_by_title(tasks, requested_title):
+    """Require an exact title match for destructive operations."""
+
+    if (
+        not isinstance(requested_title, str)
+        or not requested_title.strip()
+    ):
+        return None, "missing"
+
+    requested = requested_title.strip().casefold()
+
+    matches = [
+        task for task in tasks
+        if (task.get("title") or "").strip().casefold() == requested
+    ]
+
+    if len(matches) == 1:
+        return matches[0], None
+
+    if len(matches) > 1:
+        return None, "ambiguous"
+
+    return None, "not_found"
+
+
+def task_match_message(error, tasks, requested_title):
+    if error == "missing":
+        return "Please tell me the task's title."
+
+    if error == "ambiguous":
+        requested = (
+            requested_title.casefold()
+            if isinstance(requested_title, str)
+            else ""
+        )
+
+        matches = [
+            task.get("title", "Untitled task")
+            for task in tasks
+            if requested
+            and requested in (task.get("title") or "").casefold()
+        ]
+
+        if matches:
+            return (
+                "I found multiple matching tasks: "
+                + ", ".join(matches)
+                + ". Please specify the exact title."
+            )
+
+        return (
+            "Multiple matching tasks were found. "
+            "Please specify the exact title."
+        )
+
+    return f"I couldn't find a task named '{requested_title}'."
+
+
+def format_tasks(
+    tasks,
+    empty_message="You don't have any tasks saved yet.",
+):
+    """Format tasks for display in chat."""
+
+    if not tasks:
+        return empty_message
+
+    lines = []
+
+    for task in tasks:
+        subject, priority = get_task_metadata(task)
+
+        status = (
+            "Completed"
+            if task.get("completed")
+            else "Pending"
+        )
+
+        deadline = task.get("due_date") or "Not specified"
+
+        lines.append(
+            f"- {task.get('title', 'Untitled task')} "
+            f"| Subject: {subject} "
+            f"| Priority: {priority.title()} "
+            f"| Due: {deadline} "
+            f"| Status: {status}"
+        )
+
+    return "Here are your tasks:\n" + "\n".join(lines)
+
+
+def detect_task_list_mode(message):
+    """
+    Detect task-list requests locally.
+
+    Returns 'pending', 'completed', 'all', or None.
+    """
+
+    text = message.casefold()
+
+    if not re.search(r"\b(tasks?|assignments?)\b", text):
+        return None
+
+    if re.search(
+        r"\b(create|add|make|complete|finish|mark|delete|remove|"
+        r"reopen|open)\b",
+        text,
+    ):
+        return None
+
+    if not re.search(
+        r"\b(show|list|display|view|see|check|get|what|which|tell)\b"
+        r"|do i have",
+        text,
+    ):
+        return None
+
+    wants_pending = bool(
+        re.search(
+            r"\b(pending|incomplete|unfinished|to-do|todo)\b",
+            text,
+        )
+    )
+
+    wants_completed = bool(
+        re.search(
+            r"\b(completed|finished|done)\b",
+            text,
+        )
+    )
+
+    wants_all = bool(
+        re.search(r"\b(all|every|everything)\b", text)
+    )
+
+    if wants_pending and wants_completed:
+        return "all"
+
+    if wants_pending:
+        return "pending"
+
+    if wants_completed:
+        return "completed"
+
+    if wants_all:
+        return "all"
+
+    return "pending"
+
+
+# --------------------------------------------------
+# REST API endpoints
+# Existing direct REST functionality is preserved.
+# --------------------------------------------------
+
+@app.get("/")
+def home():
+    return {
+        "message": "Welcome to CampusPilot AI!",
+        "status": "running",
+    }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/tasks")
+def get_tasks(include_completed: bool = True):
+    return {"tasks": list_tasks(include_completed)}
+
+
+@app.post("/tasks", status_code=201)
+def add_task(task: TaskCreate):
+    title = task.title.strip()
+
+    if not title:
+        raise HTTPException(
+            status_code=422,
+            detail="Task title cannot be empty.",
+        )
+
+    if task.due_date:
+        try:
+            date.fromisoformat(task.due_date)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail="Due date must use YYYY-MM-DD format.",
+            ) from error
+
+    try:
+        return create_task(
+            title,
+            task.description,
+            task.due_date,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+
+
+@app.patch("/tasks/{task_id}/complete")
+def mark_task_complete(task_id: int):
+    task = complete_task(task_id)
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found.",
+        )
+
+    return task
+
+
+@app.patch("/tasks/{task_id}/reopen")
+def mark_task_pending(task_id: int):
+    task = reopen_task(task_id)
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found.",
+        )
+
+    return task
+
+
+@app.delete("/tasks/{task_id}")
+def remove_task(task_id: int):
+    deleted = delete_task(task_id)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found.",
+        )
+
+    return {
+        "message": "Task deleted successfully.",
+        "task_id": task_id,
+    }
+
+
+# --------------------------------------------------
+# AI chat endpoint
+# Task operations in this route use MCP.
+# --------------------------------------------------
+
+@app.post("/api/chat")
+def chat(request: ChatRequest):
+    try:
+        message = request.message.strip()
+
+        if not message:
+            raise HTTPException(
+                status_code=422,
+                detail="Message cannot be empty.",
+            )
+
+        # All task context for the chat comes through MCP.
+        tasks = mcp_list_tasks()
+
+        # Handle task-list requests without requiring Gemini.
+        list_mode = detect_task_list_mode(message)
+
+        if list_mode:
+            if list_mode == "pending":
+                selected_tasks = [
+                    task for task in tasks
+                    if not task.get("completed")
+                ]
+                empty_message = "You have no pending tasks."
+
+            elif list_mode == "completed":
+                selected_tasks = [
+                    task for task in tasks
+                    if task.get("completed")
+                ]
+                empty_message = "You have no completed tasks."
+
+            else:
+                selected_tasks = tasks
+                empty_message = "You don't have any tasks saved yet."
+
+            return {
+                "reply": format_tasks(
+                    selected_tasks,
+                    empty_message,
+                )
+            }
+
+        # Process explicit delete confirmation before asking Gemini.
+        confirmation = re.fullmatch(
+            r"confirm delete:\s*(.+)",
+            message,
+            flags=re.IGNORECASE,
+        )
+
+        if confirmation:
+            requested_title = confirmation.group(1).strip()
+
+            task, error = find_exact_task_by_title(
+                tasks,
+                requested_title,
+            )
+
+            if error:
+                return {
+                    "reply": task_match_message(
+                        error,
+                        tasks,
+                        requested_title,
+                    )
+                }
+
+            task_id = task.get("id")
+
+            if task_id is None:
+                return {
+                    "reply": (
+                        "I couldn't identify the task's database ID."
+                    )
+                }
+
+            mcp_delete_task(task_id)
+
+            return {
+                "reply": (
+                    f"Deleted '{task.get('title')}' successfully."
+                )
+            }
+
+        # Gemini classifies the message and extracts task details.
+        result = ask_ai(message, tasks=tasks)
+
+        if not isinstance(result, dict):
+            logger.error("AI returned a non-dictionary response.")
+            return {
+                "reply": (
+                    "I couldn't understand that request. "
+                    "Please try again."
+                )
+            }
+
+        action = result.get("action", "chat")
+        reply = result.get("reply", "")
+
+        if action == "chat":
+            return {
+                "reply": (
+                    reply
+                    if isinstance(reply, str) and reply.strip()
+                    else "How can I help with your studies?"
+                )
+            }
+
+        # Gemini may classify a task-list request differently from
+        # the local detector. List tasks are still retrieved via MCP.
+        if action == "list_tasks":
+            pending_tasks = [
+                task for task in tasks
+                if not task.get("completed")
+            ]
+
+            return {
+                "reply": format_tasks(
+                    pending_tasks,
+                    "You have no pending tasks.",
+                )
+            }
+
+        # Create a task through MCP.
+        if action == "create_task":
+            title = result.get("title", "")
+            subject = result.get("subject", "General")
+            priority = result.get("priority", "medium")
+            due_date = result.get("due_date", "")
+
+            if not isinstance(title, str) or not title.strip():
+                return {
+                    "reply": "What title should I use for the new task?"
+                }
+
+            title = title.strip()
+
+            if len(title) > 200:
+                return {
+                    "reply": (
+                        "Please use a task title of "
+                        "200 characters or fewer."
+                    )
+                }
+
+            if not isinstance(subject, str):
+                subject = "General"
+
+            subject = subject.strip() or "General"
+
+            if priority not in ("low", "medium", "high"):
+                priority = "medium"
+
+            if not isinstance(due_date, str):
+                due_date = ""
+
+            due_date = due_date.strip()
+
+            if due_date:
+                try:
+                    date.fromisoformat(due_date)
+                except ValueError:
+                    return {
+                        "reply": (
+                            "I couldn't understand the deadline. "
+                            "Please provide a date such as 2026-10-28."
+                        )
+                    }
+
+            description = TASK_META_PREFIX + json.dumps({
+                "subject": subject,
+                "priority": priority,
+            })
+
+            created = mcp_create_task(
+                title,
+                description,
+                due_date,
+            )
+
+            return {
+                "reply": (
+                    f"Created task '{title}'. "
+                    f"Subject: {subject}. "
+                    f"Priority: {priority.title()}. "
+                    f"Due date: {due_date or 'Not specified'}."
+                ),
+                "task": created,
+            }
+
+        # Handle completion, reopening, and deletion requests.
+        if action in (
+            "complete_task",
+            "reopen_task",
+            "delete_task",
+        ):
+            requested_title = result.get("task_title", "")
+
+            if action == "delete_task":
+                task, error = find_exact_task_by_title(
+                    tasks,
+                    requested_title,
+                )
+            else:
+                task, error = find_task_by_title(
+                    tasks,
+                    requested_title,
+                )
+
+            if error:
+                return {
+                    "reply": task_match_message(
+                        error,
+                        tasks,
+                        requested_title,
+                    )
+                }
+
+            # Deletion requires explicit user confirmation.
+            if action == "delete_task":
+                title = task.get("title", "Untitled task")
+
+                return {
+                    "reply": (
+                        f"Are you sure you want to delete '{title}'? "
+                        f"To confirm, send exactly: "
+                        f"confirm delete: {title}"
+                    )
+                }
+
+            task_id = task.get("id")
+
+            if task_id is None:
+                return {
+                    "reply": (
+                        "I couldn't identify the task's database ID."
+                    )
+                }
+
+            if action == "complete_task":
+                if task.get("completed"):
+                    return {
+                        "reply": (
+                            f"'{task.get('title')}' "
+                            "is already completed."
+                        )
+                    }
+
+                updated = mcp_update_task(
+                    "complete_task",
+                    task_id,
+                )
+
+                return {
+                    "reply": (
+                        f"Marked '{updated.get('title', task.get('title'))}' "
+                        "as completed."
+                    )
+                }
+
+            if action == "reopen_task":
+                if not task.get("completed"):
+                    return {
+                        "reply": (
+                            f"'{task.get('title')}' "
+                            "is already pending."
+                        )
+                    }
+
+                updated = mcp_update_task(
+                    "reopen_task",
+                    task_id,
+                )
+
+                return {
+                    "reply": (
+                        f"Reopened '{updated.get('title', task.get('title'))}'."
+                    )
+                }
+
+        logger.warning("Unknown AI action: %r", action)
+
+        return {
+            "reply": (
+                "I couldn't determine that action. "
+                "Please rephrase your request."
+            )
+        }
+
+    except HTTPException:
+        raise
+
+    except RuntimeError as error:
+        logger.error("Chat service error: %s", error)
+
+        raise HTTPException(
+            status_code=503,
+            detail=str(error),
+        ) from error
+
+    except Exception as error:
+        logger.exception("Chat request failed")
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The request failed. Check the VS Code terminal "
+                "for the underlying error."
+            ),
+        ) from error
